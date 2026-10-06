@@ -81,7 +81,11 @@ jobs:
             - Rode `TZ=America/Sao_Paulo date` para saber a data e a hora de Brasília.
             - Leia `ultimas.json`: é a lista do que o portal publicou nas últimas 48 horas
               (titulo, categoria, palavras, imagem_origem, publicado_em).
-            - Não repita assunto nem foto que apareça nessa lista.
+            - Antes de escolher as pautas, liste os assuntos de `ultimas.json`. É proibido
+              repetir um assunto já publicado, mesmo com outro título, outro ângulo ou outra
+              fonte. Só volte a um assunto se houver fato novo relevante, e deixe claro no
+              texto o que mudou.
+            - Não repita foto (imagem_origem) que apareça nessa lista.
 
             ## 2. Categorias e formato
             - Categorias válidas: Brasil, Mundo, Polícia, Política, Tecnologia,
@@ -132,6 +136,11 @@ jobs:
               recusa WebP), com menos de 5 MB e no máximo 4 megapixels (largura x altura
               até 4.000.000; acima disso o site recusa), licença livre (CC BY, CC BY-SA,
               CC0 ou domínio público) e autor informado.
+            - Toda notícia PRECISA de foto: sem imagem_link e legenda_credito o site recusa
+              a publicação. Faça até 5 buscas por notícia, com termos em português e em
+              inglês. Se não achar foto específica dentro dos critérios, use uma foto
+              genérica do tema (prédio, objeto, paisagem, bandeira) e identifique como
+              imagem ilustrativa. Se mesmo assim não houver foto, troque de pauta.
             - Baixe a miniatura (thumburl) com curl e abra com Read para conferir que a
               imagem serve. Identifique pessoas SOMENTE pela descrição do arquivo, nunca
               pelo rosto.
@@ -165,6 +174,7 @@ jobs:
             No campo "texto", separe os parágrafos com \n. O arquivo precisa ser JSON
             válido. Se não conseguir fechar uma pauta com segurança, entregue menos de
             4 arquivos em vez de publicar algo duvidoso.
+            Nunca salve um arquivo com campo vazio: o site recusa.
 
             Por fim, escreva `saida/relatorio.md` com: tabela (notícia, categoria, tipo,
             foto), o que não foi conferido em fonte, pautas descartadas e por quê, e os
