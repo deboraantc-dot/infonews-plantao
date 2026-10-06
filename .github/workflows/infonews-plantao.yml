@@ -12,11 +12,9 @@ name: Info News plantão
 
 on:
   schedule:
-    # O GitHub usa horário UTC. Brasília = UTC-3.
-    # 05:59 às 20:59 de Brasília:
-    - cron: "59 8-23 * * *"
-    # 21:59 e 22:59 de Brasília:
-    - cron: "59 0-1 * * *"
+    # A cada 30 minutos, 24 horas por dia (48 execuções, 1 notícia cada).
+    # O GitHub costuma atrasar alguns minutos; a hora de Brasília é lida na execução.
+    - cron: "0,30 * * * *"
   workflow_dispatch: {} # botão "Run workflow" para testar na hora
 
 concurrency:
@@ -26,7 +24,7 @@ concurrency:
 jobs:
   plantao:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 20
     permissions:
       contents: read
       id-token: write
@@ -67,9 +65,9 @@ jobs:
           cat > validar.py <<'PY'
           import glob, json
 
-          CATS = {"Brasil", "Mundo", "Polícia", "Política", "Tecnologia", "Curiosidades", "Clima", "Esporte", "Eletromobilidade", "Energia Solar"}
+          CATS = {"Brasil", "Mundo", "Polícia", "Política", "Tecnologia", "Curiosidades", "Clima", "Esporte", "Eletromobilidade", "Energia Solar", "São José do Rio Preto", "Norte Pioneiro"}
           erros = []
-          arquivos = sorted(glob.glob("saida/[1-4].json"))
+          arquivos = sorted(glob.glob("saida/1.json"))
           if not arquivos:
               erros.append("nenhum arquivo saida/N.json encontrado")
           cats = []
@@ -120,18 +118,22 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           claude_args: |
-            --max-turns 200
+            --max-turns 120
             --allowedTools "WebFetch,WebSearch,Read,Write,Bash(curl:*),Bash(date:*),Bash(mkdir:*),Bash(ls:*),Bash(python3 validar.py)"
           prompt: |
             Você é o plantão do portal de notícias INFO NEWS (https://infonews.today).
-            Sua tarefa nesta execução: apurar e escrever 4 notícias novas, em português
-            do Brasil, e salvar cada uma em um arquivo JSON na pasta `saida/`.
+            Sua tarefa nesta execução: apurar e escrever UMA notícia nova, em português
+            do Brasil, e salvar em `saida/1.json`. O portal publica uma notícia a cada
+            30 minutos, 24 horas por dia; esta execução é uma dessas vagas.
             Você NÃO publica nada: uma etapa automática depois de você faz a publicação.
             Ninguém está acompanhando; não faça perguntas, decida e siga.
-            Meta de tempo: até 15 minutos.
+            Meta de tempo: até 10 minutos.
 
             ## 1. Antes de começar
             - Rode `TZ=America/Sao_Paulo date` para saber a data e a hora de Brasília.
+              Identifique a VAGA desta execução: a hora (0 a 23) e se o minuto é menor
+              que 30 (vaga ":00") ou não (vaga ":30"). Se o GitHub atrasou e o minuto
+              passou de 30, continue tratando como a vaga que estava prevista.
             - Leia `ultimas.json`: é a lista do que o portal publicou nas últimas 48 horas
               (titulo, categoria, palavras, imagem_origem, publicado_em).
             - Antes de escolher as pautas, liste os assuntos de `ultimas.json`. É proibido
@@ -140,27 +142,79 @@ jobs:
               texto o que mudou.
             - Não repita foto (imagem_origem) que apareça nessa lista.
 
-            ## 2. Categorias e formato
+            ## 2. Vaga, categoria e formato
             - Categorias válidas: Brasil, Mundo, Polícia, Política, Tecnologia,
-              Curiosidades, Clima, Esporte, Eletromobilidade, Energia Solar.
-            - COTAS DO DIA (prioridade máxima). Use a hora de Brasília:
-              * Se a hora for 7, 12 ou 18: uma das 4 notícias é de Eletromobilidade.
-              * Se a hora for 10: uma das 4 notícias é de Energia Solar.
-              * Se a hora for 21: conte em `ultimas.json` as publicações das últimas 24 h.
-                Se Eletromobilidade tiver menos de 3, inclua uma; se Energia Solar tiver
-                menos de 1, inclua uma.
-              * Nas demais horas, essas duas categorias só entram se houver fato muito
-                relevante, e no máximo uma delas por execução.
-            - As outras vagas vão para categorias DIFERENTES entre si, escolhidas entre
-              as 8 gerais (Brasil, Mundo, Polícia, Política, Tecnologia, Curiosidades,
-              Clima, Esporte): pegue as que estão há MAIS tempo sem publicação em
-              `ultimas.json` (categoria que nunca aparece na lista vem primeiro).
-            - 3 textos curtos (4 a 6 parágrafos) e 1 texto longo (mais de 600 palavras,
-              ideal 650 a 900, sem enrolação). O longo vai para a categoria desta rodada
-              que está há mais tempo sem texto longo (em `ultimas.json`, longo = palavras > 600).
-              Nas horas 12 e 18, dê preferência a fazer o texto longo em Eletromobilidade.
-            - No máximo 1 notícia com posicao "destaque" (a mais relevante). As outras,
-              "normal". Nunca use "manchete". "urgente" é sempre false.
+              Curiosidades, Clima, Esporte, Eletromobilidade, Energia Solar,
+              São José do Rio Preto, Norte Pioneiro (estas duas formam a seção
+              "Regionais" do site).
+            - TABELA DE VAGAS FIXAS (hora de Brasília, vaga ":00"). Prioridade máxima:
+              * 07:00  Eletromobilidade (fato nacional do setor)
+              * 08:00  TEXTO LONGO em categoria geral (rodízio)
+              * 09:00  São José do Rio Preto (regional; veja o item 2c)
+              * 10:00  Energia Solar
+              * 11:00  Eleições 2026, na categoria Política (só até 26/10/2026; veja o item 2b)
+              * 12:00  Eletromobilidade: obrigatoriamente scooters, bicicletas, patinetes
+                       e outros veículos elétricos leves/autopropelidos no Brasil
+                       (vendas, regras do Contran, segurança, lançamentos, cidades)
+              * 13:00  TEXTO LONGO em categoria geral (rodízio)
+              * 14:00  Norte Pioneiro (regional; veja o item 2c)
+              * 16:00  São José do Rio Preto (regional)
+              * 17:00  Eleições 2026, na categoria Política (só até 26/10/2026)
+              * 18:00  TEXTO LONGO em Eletromobilidade
+              * 20:00  Norte Pioneiro (regional)
+              * 21:00  CONFERÊNCIA: conte em `ultimas.json` as publicações das últimas
+                       24 h. Se faltar alguma cota do dia (3 de Eletromobilidade, sendo
+                       1 de veículos leves; 1 de Energia Solar; 2 de São José do Rio Preto;
+                       2 de Norte Pioneiro; 2 de eleições até 26/10), publique a que
+                       estiver faltando. Se nada faltar, vaga geral.
+            - Todas as outras vagas (inclusive todas as ":30" e a madrugada) são GERAIS:
+              escolha, entre as 8 categorias gerais (Brasil, Mundo, Polícia, Política,
+              Tecnologia, Curiosidades, Clima, Esporte), a que está há MAIS tempo sem
+              publicação em `ultimas.json` (categoria ausente da lista vem primeiro).
+              Entre 23:00 e 05:30, prefira Mundo, Tecnologia, Curiosidades e Esporte,
+              que têm fatos novos de madrugada.
+            - Formato: texto curto (4 a 6 parágrafos), exceto nas vagas marcadas como
+              TEXTO LONGO (mais de 600 palavras, ideal 650 a 900, sem enrolação).
+            - posicao: "destaque" só nas vagas 08:00, 13:00 e 18:00 e nas de eleições;
+              nas demais, "normal". Nunca use "manchete". "urgente" é sempre false.
+            - Se a pauta da vaga fixa não existir com fato confirmado (por exemplo, nada
+              novo na região de Rio Preto hoje), procure um fato dos últimos 7 dias ainda não
+              publicado; se mesmo assim não houver, use a vaga como geral e registre no
+              relatório que a cota ficou em aberto (a vaga 21:00 tenta de novo).
+
+            ## 2b. Eleições 2026 (regra DATADA)
+            - Vale somente se a data de Brasília for igual ou anterior a 26/10/2026.
+              A partir de 27/10/2026, ignore este item: as vagas 11:00 e 17:00 passam a
+              ser gerais e a conferência das 21:00 deixa de contar eleições.
+            - Fontes: TSE (tse.jus.br, resultados.tse.jus.br), TREs, Agência Senado,
+              Agência Câmara, Agência Brasil. Cobertura neutra, mesmo espaço para os
+              candidatos, sem adjetivos, sem opinião.
+            - Pesquisa eleitoral: só publique se a matéria citar o número de registro
+              no TSE (formato BR-00000/2026 ou o registro do TRE). Sem o número, não
+              publique a pesquisa; escolha outra pauta eleitoral.
+            - Resultado só com confirmação oficial do TSE; segundo turno em 25/10/2026.
+
+            ## 2c. Regionais (regra permanente)
+            - A notícia regional pode ser de QUALQUER tema do site (política local,
+              economia, saúde, educação, obras, clima, esporte, cultura, polícia sem
+              pessoa identificada), desde que tenha relevância e alcance para a região:
+              algo que aconteceu em uma das cidades da lista e repercutiu naquele dia.
+              Cite a cidade no título e explique no texto o que muda para quem mora lá.
+            - Categoria São José do Rio Preto = Região Metropolitana de Rio Preto e
+              noroeste paulista: São José do Rio Preto, Fernandópolis, Mirassol, Bady
+              Bassitt, Cedral, Guapiaçu, Ipiguá, Onda Verde, Bálsamo, Monte Aprazível,
+              Tanabi, José Bonifácio, Olímpia, Potirendaba, Ibirá, Nova Granada, Uchoa,
+              Neves Paulista, Catanduva, Bebedouro, Votuporanga, Barretos, Valentim
+              Gentil, Sales, Jales e vizinhas.
+            - Categoria Norte Pioneiro = Norte Pioneiro do Paraná e Ourinhos (SP):
+              Ourinhos, Carlópolis, Jacarezinho, Santo Antônio da Platina, Cornélio
+              Procópio, Bandeirantes, Ibaiti, Abatiá, Andirá, Barra do Jacaré, Cambará,
+              Conselheiro Mairinck, Figueira, Guapirama, Jaboti, Japira, Joaquim Távora,
+              Jundiaí do Sul, Pinhalão, Quatiguá, Ribeirão Claro, Ribeirão do Pinhal,
+              Salto do Itararé, Santana do Itararé, São José da Boa Vista, Siqueira
+              Campos, Tomazina, Wenceslau Braz e demais municípios da AMUNORPI/AMUNOP.
+            - Prefira o fato de maior repercussão do dia na região; se o dia estiver
+              fraco, vale fato dos últimos 7 dias ainda não publicado.
 
             ## 3. Fontes
             Abra com WebFetch, em paralelo quando possível:
@@ -179,7 +233,21 @@ jobs:
               avanços, legislação e regulação, tarifas, geração distribuída): absolar.org.br,
               canalsolar.com.br, gov.br/aneel, gov.br/mme, epe.gov.br, ons.org.br e Agência
               Brasil.
-            - Nessas duas categorias, prefira fatos do Brasil e sempre informe a data do fato.
+            - São José do Rio Preto (e região): riopreto.sp.gov.br, fernandopolis.sp.gov.br,
+              votuporanga.sp.gov.br, catanduva.sp.gov.br, olimpia.sp.gov.br, barretos.sp.gov.br,
+              mirassol.sp.gov.br, rmriopreto.com.br, agencia.sp.gov.br (governo de SP),
+              diariodaregiao.com.br e gazetadoriopreto.com.br (se abrirem); busque também
+              o nome das cidades na Agência Brasil e na CNN Brasil.
+            - Norte Pioneiro: amunorpi.com.br, aen.pr.gov.br (Agência de Notícias do
+              Paraná), ourinhos.sp.gov.br, carlopolis.pr.gov.br, jacarezinho.pr.gov.br,
+              santoantoniodaplatina.pr.gov.br, corneliprocopio.pr.gov.br, bandeirantes.pr.gov.br,
+              npdiario.com.br (só sites que abram sem paywall); busque o nome das
+              cidades na Agência Brasil e na CNN Brasil.
+            - Nas regionais: prefeituras, câmaras e agências oficiais primeiro; evite
+              pauta policial com pessoa identificada; vale obra, saúde, educação,
+              economia local, evento, clima e decisão da câmara. Informe sempre a cidade
+              no título.
+            - Nas categorias de setor, prefira fatos do Brasil e sempre informe a data do fato.
               Notícia de empresa só com fato concreto (lançamento, fábrica, contrato, dado
               oficial); nada de conteúdo promocional nem texto de assessoria copiado.
             Nunca use Estadão, O Globo, G1, UOL, MSN ou BBC. Nunca tente contornar
@@ -230,9 +298,7 @@ jobs:
               via Wikimedia Commons".
 
             ## 6. Saída
-            Crie `saida/1.json`, `saida/2.json`, `saida/3.json` e `saida/4.json`.
-            Deixe no arquivo 4 a notícia mais importante: ela é publicada por último
-            e fica no topo do site. Cada arquivo tem exatamente este formato:
+            Crie `saida/1.json` com exatamente este formato:
 
             {
               "titulo": "...",
@@ -248,17 +314,17 @@ jobs:
             }
 
             No campo "texto", separe os parágrafos com \n. O arquivo precisa ser JSON
-            válido. Se não conseguir fechar uma pauta com segurança, entregue menos de
-            4 arquivos em vez de publicar algo duvidoso.
+            válido. Se não conseguir fechar a pauta com segurança, não crie o arquivo:
+            é melhor uma vaga vazia do que uma notícia duvidosa.
             Nunca salve um arquivo com campo vazio: o site recusa.
 
             Antes de terminar, rode `python3 validar.py`. Ele confere tamanhos e campos.
             Corrija os arquivos e rode de novo até aparecer TUDO OK. Não conte caracteres
             de cabeça: confie no validador.
 
-            Por fim, escreva `saida/relatorio.md` com: tabela (notícia, categoria, tipo,
-            foto), o que não foi conferido em fonte, pautas descartadas e por quê, e os
-            links das fontes usadas.
+            Por fim, escreva `saida/relatorio.md` com: vaga desta execução, notícia
+            (título, categoria, tipo, foto), o que não foi conferido em fonte, pautas
+            descartadas e por quê, cota em aberto (se houver) e os links das fontes.
 
       - name: Publicar no portal
         if: always() && steps.cfg.outputs.pronto == 'sim'
@@ -287,4 +353,5 @@ jobs:
             echo
             if [ -f saida/relatorio.md ]; then cat saida/relatorio.md; fi
           } >> "$GITHUB_STEP_SUMMARY"
-          [ "$total" -gt 0 ]
+          # Vaga vazia (sem arquivo) não é erro; erro da API é.
+          if ls saida/1.json >/dev/null 2>&1; then [ "$total" -gt 0 ]; fi
