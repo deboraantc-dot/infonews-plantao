@@ -67,7 +67,7 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           claude_args: |
-            --max-turns 80
+            --max-turns 200
             --allowedTools "WebFetch,WebSearch,Read,Write,Bash(curl:*),Bash(date:*),Bash(mkdir:*),Bash(ls:*)"
           prompt: |
             Você é o plantão do portal de notícias INFO NEWS (https://infonews.today).
@@ -181,7 +181,7 @@ jobs:
             links das fontes usadas.
 
       - name: Publicar no portal
-        if: steps.cfg.outputs.pronto == 'sim'
+        if: always() && steps.cfg.outputs.pronto == 'sim'
         env:
           INFONEWS_API_URL: ${{ secrets.INFONEWS_API_URL }}
           INFONEWS_PUBLISH_TOKEN: ${{ secrets.INFONEWS_PUBLISH_TOKEN }}
