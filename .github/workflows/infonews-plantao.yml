@@ -61,6 +61,61 @@ jobs:
             -o ultimas.json
           echo "Posts recentes carregados: $(wc -c < ultimas.json) bytes"
 
+      - name: Preparar validador
+        if: steps.cfg.outputs.pronto == 'sim'
+        run: |
+          cat > validar.py <<'PY'
+          import glob, json
+
+          CATS = {"Brasil", "Mundo", "Polícia", "Política", "Tecnologia", "Curiosidades", "Clima", "Esporte"}
+          erros = []
+          arquivos = sorted(glob.glob("saida/[1-4].json"))
+          if not arquivos:
+              erros.append("nenhum arquivo saida/N.json encontrado")
+          cats = []
+          destaques = 0
+          for a in arquivos:
+              try:
+                  d = json.load(open(a, encoding="utf-8"))
+              except Exception as e:
+                  erros.append(f"{a}: JSON inválido ({e})")
+                  continue
+              t = str(d.get("titulo", ""))
+              lf = str(d.get("linha_fina", ""))
+              if not 10 <= len(t) <= 90:
+                  erros.append(f"{a}: titulo tem {len(t)} caracteres (permitido: 10 a 90)")
+              if not 80 <= len(lf) <= 160:
+                  erros.append(f"{a}: linha_fina tem {len(lf)} caracteres (permitido: 80 a 160)")
+              for campo in ("legenda_credito", "fonte_nome", "fonte_link", "imagem_link", "texto"):
+                  if not str(d.get(campo, "")).strip():
+                      erros.append(f"{a}: campo {campo} vazio")
+              img = str(d.get("imagem_link", ""))
+              if img and not img.startswith("https://upload.wikimedia.org/"):
+                  erros.append(f"{a}: imagem_link precisa começar com https://upload.wikimedia.org/")
+              if img.lower().split("?")[0].endswith(".webp"):
+                  erros.append(f"{a}: imagem em WebP não é aceita")
+              if d.get("categoria") not in CATS:
+                  erros.append(f"{a}: categoria inválida: {d.get('categoria')}")
+              cats.append(d.get("categoria"))
+              if d.get("posicao") not in ("normal", "destaque"):
+                  erros.append(f"{a}: posicao deve ser normal ou destaque")
+              if d.get("posicao") == "destaque":
+                  destaques += 1
+              pars = [x for x in str(d.get("texto", "")).split("\n") if x.strip()]
+              if len(pars) < 4:
+                  erros.append(f"{a}: texto tem {len(pars)} parágrafos (mínimo: 4)")
+          if len(set(cats)) != len(cats):
+              erros.append("há categorias repetidas entre os arquivos")
+          if destaques > 1:
+              erros.append("mais de uma notícia marcada como destaque")
+          if erros:
+              print("CORRIJA:")
+              for e in erros:
+                  print(" -", e)
+          else:
+              print("TUDO OK:", len(arquivos), "arquivo(s) válidos")
+          PY
+
       - name: Claude apura e escreve as 4 notícias
         if: steps.cfg.outputs.pronto == 'sim'
         uses: anthropics/claude-code-action@v1
@@ -68,7 +123,7 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           claude_args: |
             --max-turns 200
-            --allowedTools "WebFetch,WebSearch,Read,Write,Bash(curl:*),Bash(date:*),Bash(mkdir:*),Bash(ls:*)"
+            --allowedTools "WebFetch,WebSearch,Read,Write,Bash(curl:*),Bash(date:*),Bash(mkdir:*),Bash(ls:*),Bash(python3 validar.py)"
           prompt: |
             Você é o plantão do portal de notícias INFO NEWS (https://infonews.today).
             Sua tarefa nesta execução: apurar e escrever 4 notícias novas, em português
@@ -124,7 +179,7 @@ jobs:
               ou crimes com pessoa identificada; acusações contra pessoa identificada;
               saúde de pessoa identificada; qualquer fato com uma única fonte duvidosa.
               Nesses casos, escolha outra pauta.
-            - Título com até 90 caracteres. Linha fina entre 120 e 155 caracteres.
+            - Título com até 85 caracteres. Linha fina entre 120 e 150 caracteres.
             - A fonte principal vai nos campos fonte_nome e fonte_link (não escreva
               "Fonte:" no corpo). Se usou um segundo veículo, o último parágrafo é
               "Com informações de <veículo>."
@@ -175,6 +230,10 @@ jobs:
             válido. Se não conseguir fechar uma pauta com segurança, entregue menos de
             4 arquivos em vez de publicar algo duvidoso.
             Nunca salve um arquivo com campo vazio: o site recusa.
+
+            Antes de terminar, rode `python3 validar.py`. Ele confere tamanhos e campos.
+            Corrija os arquivos e rode de novo até aparecer TUDO OK. Não conte caracteres
+            de cabeça: confie no validador.
 
             Por fim, escreva `saida/relatorio.md` com: tabela (notícia, categoria, tipo,
             foto), o que não foi conferido em fonte, pautas descartadas e por quê, e os
