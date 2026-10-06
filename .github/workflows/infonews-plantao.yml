@@ -127,10 +127,10 @@ jobs:
 
             ## 5. Foto
             - Use apenas foto real de licença livre do Wikimedia Commons. Busque com:
-              `curl -s "https://commons.wikimedia.org/w/api.php?action=query&format=json&generator=search&gsrnamespace=6&gsrlimit=20&gsrsearch=<TERMO>%20filetype:bitmap&prop=imageinfo&iiprop=extmetadata|url|size&iiurlwidth=640"`
+              `curl -s "https://commons.wikimedia.org/w/api.php?action=query&format=json&generator=search&gsrnamespace=6&gsrlimit=50&gsrsearch=<TERMO>%20filetype:bitmap&prop=imageinfo&iiprop=extmetadata|url|size&iiurlwidth=640"`
             - Critérios: horizontal, largura mínima de 1400 px, arquivo JPG ou PNG (o site
-              recusa WebP), com menos de 5 MB e no máximo 16 megapixels (largura x altura
-              até 16.000.000; acima disso o site recusa), licença livre (CC BY, CC BY-SA,
+              recusa WebP), com menos de 5 MB e no máximo 4 megapixels (largura x altura
+              até 4.000.000; acima disso o site recusa), licença livre (CC BY, CC BY-SA,
               CC0 ou domínio público) e autor informado.
             - Baixe a miniatura (thumburl) com curl e abra com Read para conferir que a
               imagem serve. Identifique pessoas SOMENTE pela descrição do arquivo, nunca
