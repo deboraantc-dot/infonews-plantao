@@ -92,8 +92,6 @@ jobs:
               img = str(d.get("imagem_link", ""))
               if img and not img.startswith("https://upload.wikimedia.org/"):
                   erros.append(f"{a}: imagem_link precisa começar com https://upload.wikimedia.org/")
-              if img.lower().split("?")[0].endswith(".webp"):
-                  erros.append(f"{a}: imagem em WebP não é aceita")
               if d.get("categoria") not in CATS:
                   erros.append(f"{a}: categoria inválida: {d.get('categoria')}")
               cats.append(d.get("categoria"))
@@ -210,10 +208,10 @@ jobs:
             ## 5. Foto
             - Use apenas foto real de licença livre do Wikimedia Commons. Busque com:
               `curl -s "https://commons.wikimedia.org/w/api.php?action=query&format=json&generator=search&gsrnamespace=6&gsrlimit=50&gsrsearch=<TERMO>%20filetype:bitmap&prop=imageinfo&iiprop=extmetadata|url|size&iiurlwidth=640"`
-            - Critérios: horizontal, largura mínima de 1400 px, arquivo JPG ou PNG (o site
-              recusa WebP), com menos de 5 MB e no máximo 4 megapixels (largura x altura
-              até 4.000.000; acima disso o site recusa), licença livre (CC BY, CC BY-SA,
-              CC0 ou domínio público) e autor informado.
+            - Critérios: horizontal, largura mínima de 1400 px, arquivo JPG, PNG ou WebP
+              com menos de 20 MB (o site reduz a foto sozinho), licença livre (CC BY,
+              CC BY-SA, CC0 ou domínio público) e autor informado. Entre duas fotos
+              parecidas, prefira a menor.
             - Toda notícia PRECISA de foto: sem imagem_link e legenda_credito o site recusa
               a publicação. Faça até 5 buscas por notícia, com termos em português e em
               inglês. Se não achar foto específica dentro dos critérios, use uma foto
