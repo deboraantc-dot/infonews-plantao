@@ -1,7 +1,7 @@
 # Salvar no repositório do GitHub em: .github/workflows/infonews-plantao.yml
 # v3 (07/10/2026): Google Trends BR como insumo de pauta + títulos no padrão Discover/Notícias + validador anti-clickbait
 #   + categoria Economia e rodízio ponderado das vagas gerais por valor publicitário (RPM)
-#   + v3.1: Trends com fontes alternativas; v3.2: validador troca a foto pela miniatura de 1600 px do Commons.
+#   + v3.1: Trends com fontes alternativas; v3.2: validador troca a foto pela miniatura de 1600 px do Commons (host upload.wikimedia.org).
 #
 # Segredos necessários (Settings > Secrets and variables > Actions):
 #   CLAUDE_CODE_OAUTH_TOKEN  -> token da sua assinatura Claude (gerado com `claude setup-token`)
@@ -112,6 +112,8 @@ jobs:
                       pg = json.load(urllib.request.urlopen(req, timeout=20))["query"]["pages"]
                       info = next(iter(pg.values())).get("imageinfo", [{}])[0]
                       w, h, mime, thumb = info.get("width", 0), info.get("height", 0), info.get("mime", ""), info.get("thumburl", "")
+                      # O site só aceita upload.wikimedia.org; o Commons às vezes devolve thumb.wikimedia.org (mesmo caminho).
+                      thumb = thumb.replace("https://thumb.wikimedia.org/", "https://upload.wikimedia.org/")
                       if not w:
                           erros.append(f"{a}: imagem não encontrada no Commons ({nome}); use o campo url ORIGINAL do arquivo")
                       elif mime not in ("image/jpeg", "image/png"):
