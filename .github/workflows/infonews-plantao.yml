@@ -1,7 +1,7 @@
 # Salvar no repositório do GitHub em: .github/workflows/infonews-plantao.yml
 # v3 (07/10/2026): Google Trends BR como insumo de pauta + títulos no padrão Discover/Notícias + validador anti-clickbait
 #   + categoria Economia e rodízio ponderado das vagas gerais por valor publicitário (RPM)
-#   + v3.1: Trends com fontes alternativas e validador de foto (<= 16 MP, >= 1200 px, horizontal).
+#   + v3.1: Trends com fontes alternativas; v3.2: validador troca a foto pela miniatura de 1600 px do Commons.
 #
 # Segredos necessários (Settings > Secrets and variables > Actions):
 #   CLAUDE_CODE_OAUTH_TOKEN  -> token da sua assinatura Claude (gerado com `claude setup-token`)
@@ -105,24 +105,35 @@ jobs:
                   try:
                       import urllib.request, urllib.parse
                       nome = urllib.parse.unquote(img.rsplit("/", 1)[-1])
-                      q = urllib.parse.urlencode({"action": "query", "format": "json", "prop": "imageinfo", "iiprop": "size|mime", "titles": "File:" + nome})
+                      if "/thumb/" in img:
+                          nome = urllib.parse.unquote(img.split("/thumb/", 1)[1].split("/")[2])
+                      q = urllib.parse.urlencode({"action": "query", "format": "json", "prop": "imageinfo", "iiprop": "size|mime|url", "iiurlwidth": 1600, "titles": "File:" + nome})
                       req = urllib.request.Request("https://commons.wikimedia.org/w/api.php?" + q, headers={"User-Agent": "InfoNewsBot/1.0 (contato@infonews.today)"})
                       pg = json.load(urllib.request.urlopen(req, timeout=20))["query"]["pages"]
                       info = next(iter(pg.values())).get("imageinfo", [{}])[0]
-                      w, h, tam = info.get("width", 0), info.get("height", 0), info.get("size", 0)
+                      w, h, mime, thumb = info.get("width", 0), info.get("height", 0), info.get("mime", ""), info.get("thumburl", "")
                       if not w:
                           erros.append(f"{a}: imagem não encontrada no Commons ({nome}); use o campo url ORIGINAL do arquivo")
+                      elif mime not in ("image/jpeg", "image/png"):
+                          erros.append(f"{a}: imagem é {mime}; use só JPG ou PNG")
+                      elif w < 1200:
+                          erros.append(f"{a}: imagem tem {w} px de largura (mínimo 1200)")
+                      elif h > w:
+                          erros.append(f"{a}: imagem vertical ({w}x{h}); use foto horizontal")
+                      elif not thumb:
+                          erros.append(f"{a}: Commons não gerou miniatura de 1600 px; escolha outra foto")
                       else:
-                          if w < 1200:
-                              erros.append(f"{a}: imagem tem {w} px de largura (mínimo 1200)")
-                          if w * h > 16_000_000:
-                              erros.append(f"{a}: imagem tem {w}x{h} = {w*h/1e6:.1f} megapixels (máximo 16 MP: o site não consegue reduzir); escolha outra foto ou uma versão menor")
-                          if tam > 20_000_000:
-                              erros.append(f"{a}: imagem tem {tam/1e6:.1f} MB (máximo 20 MB)")
-                          if h > w:
-                              erros.append(f"{a}: imagem vertical ({w}x{h}); use foto horizontal")
+                          # O site só reduz fotos pequenas: usamos a versão de 1600 px gerada pelo Commons.
+                          rq = urllib.request.Request(thumb, method="HEAD", headers={"User-Agent": "InfoNewsBot/1.0 (contato@infonews.today)"})
+                          st = urllib.request.urlopen(rq, timeout=30).status
+                          if st != 200:
+                              erros.append(f"{a}: miniatura de 1600 px respondeu HTTP {st}; escolha outra foto")
+                          elif d.get("imagem_link") != thumb:
+                              d["imagem_link"] = thumb
+                              json.dump(d, open(a, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+                              print(f"{a}: imagem_link trocado pela versão de 1600 px do Commons ({w}x{h} original)")
                   except Exception as e:
-                      print(f"AVISO: não foi possível conferir o tamanho da imagem ({e}); confira você: largura >= 1200 e largura x altura <= 16 megapixels")
+                      erros.append(f"{a}: não foi possível conferir a imagem no Commons ({e}); confira o nome do arquivo ou escolha outra foto")
               if d.get("categoria") not in CATS:
                   erros.append(f"{a}: categoria inválida: {d.get('categoria')}")
               cats.append(d.get("categoria"))
@@ -378,12 +389,11 @@ jobs:
             - Use apenas foto real de licença livre do Wikimedia Commons. Busque com:
               `curl -s "https://commons.wikimedia.org/w/api.php?action=query&format=json&generator=search&gsrnamespace=6&gsrlimit=50&gsrsearch=<TERMO>%20filetype:bitmap&prop=imageinfo&iiprop=extmetadata|url|size&iiurlwidth=640"`
             - Critérios: horizontal (proporção próxima de 16:9 ou 3:2; nunca quadrada ou
-              vertical), largura mínima de 1400 px (o Discover exige 1200) e NO MÁXIMO 16
-              MEGAPIXELS (largura x altura <= 16.000.000; o site recusa fotos maiores),
-              arquivo JPG, PNG ou WebP com menos de 20 MB, licença livre (CC BY,
+              vertical), largura mínima de 1400 px (o Discover exige 1200), arquivo JPG ou
+              PNG, licença livre (CC BY,
               CC BY-SA, CC0 ou domínio público) e autor informado. Entre duas fotos
               parecidas, prefira a menor. Os campos width e height vêm na resposta da
-              busca (iiprop=size): confira ANTES de escolher; o validador também confere.
+              busca (iiprop=size): confira ANTES de escolher.
             - Toda notícia PRECISA de foto: sem imagem_link e legenda_credito o site recusa
               a publicação. Faça até 5 buscas por notícia, com termos em português e em
               inglês. Se não achar foto específica dentro dos critérios, use uma foto
@@ -393,7 +403,9 @@ jobs:
               imagem serve. Identifique pessoas SOMENTE pela descrição do arquivo, nunca
               pelo rosto.
             - Em imagem_link use o endereço ORIGINAL do arquivo em upload.wikimedia.org
-              (campo `url`, sem "?" no final). Não use endereço de miniatura.
+              (campo `url`, sem "?" no final). O validador troca sozinho pela versão de
+              1600 px gerada pelo Commons (campo thumburl); não precisa fazer isso à mão.
+              Só JPG ou PNG (nada de WebP, TIFF, GIF ou SVG).
             - Não use foto de um evento específico como se fosse de outro. Foto genérica
               deve ser identificada como "imagem ilustrativa".
             - Nunca use fotos de Estadão, O Globo, MSN, G1, UOL, AFP, Reuters, Getty ou
