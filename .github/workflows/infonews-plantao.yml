@@ -1,6 +1,7 @@
 # Salvar no repositório do GitHub em: .github/workflows/infonews-plantao.yml
 # v3 (07/10/2026): Google Trends BR como insumo de pauta + títulos no padrão Discover/Notícias + validador anti-clickbait
-#   + categoria Economia e rodízio ponderado das vagas gerais por valor publicitário (RPM).
+#   + categoria Economia e rodízio ponderado das vagas gerais por valor publicitário (RPM)
+#   + v3.1: Trends com fontes alternativas e validador de foto (<= 16 MP, >= 1200 px, horizontal).
 #
 # Segredos necessários (Settings > Secrets and variables > Actions):
 #   CLAUDE_CODE_OAUTH_TOKEN  -> token da sua assinatura Claude (gerado com `claude setup-token`)
@@ -100,6 +101,28 @@ jobs:
               img = str(d.get("imagem_link", ""))
               if img and not img.startswith("https://upload.wikimedia.org/"):
                   erros.append(f"{a}: imagem_link precisa começar com https://upload.wikimedia.org/")
+              elif img:
+                  try:
+                      import urllib.request, urllib.parse
+                      nome = urllib.parse.unquote(img.rsplit("/", 1)[-1])
+                      q = urllib.parse.urlencode({"action": "query", "format": "json", "prop": "imageinfo", "iiprop": "size|mime", "titles": "File:" + nome})
+                      req = urllib.request.Request("https://commons.wikimedia.org/w/api.php?" + q, headers={"User-Agent": "InfoNewsBot/1.0 (contato@infonews.today)"})
+                      pg = json.load(urllib.request.urlopen(req, timeout=20))["query"]["pages"]
+                      info = next(iter(pg.values())).get("imageinfo", [{}])[0]
+                      w, h, tam = info.get("width", 0), info.get("height", 0), info.get("size", 0)
+                      if not w:
+                          erros.append(f"{a}: imagem não encontrada no Commons ({nome}); use o campo url ORIGINAL do arquivo")
+                      else:
+                          if w < 1200:
+                              erros.append(f"{a}: imagem tem {w} px de largura (mínimo 1200)")
+                          if w * h > 16_000_000:
+                              erros.append(f"{a}: imagem tem {w}x{h} = {w*h/1e6:.1f} megapixels (máximo 16 MP: o site não consegue reduzir); escolha outra foto ou uma versão menor")
+                          if tam > 20_000_000:
+                              erros.append(f"{a}: imagem tem {tam/1e6:.1f} MB (máximo 20 MB)")
+                          if h > w:
+                              erros.append(f"{a}: imagem vertical ({w}x{h}); use foto horizontal")
+                  except Exception as e:
+                      print(f"AVISO: não foi possível conferir o tamanho da imagem ({e}); confira você: largura >= 1200 e largura x altura <= 16 megapixels")
               if d.get("categoria") not in CATS:
                   erros.append(f"{a}: categoria inválida: {d.get('categoria')}")
               cats.append(d.get("categoria"))
@@ -125,8 +148,18 @@ jobs:
       - name: Baixar assuntos em alta (Google Trends Brasil)
         if: steps.cfg.outputs.pronto == 'sim'
         run: |
-          curl -sS -L --max-time 20 -A "Mozilla/5.0 (compatible; InfoNewsBot/1.0)" \
-            "https://trends.google.com/trending/rss?geo=BR" -o trends.xml || true
+          UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+          : > trends.xml
+          for u in \
+            "https://trends.google.com/trending/rss?geo=BR" \
+            "https://trends.google.com/trends/trendingsearches/daily/rss?geo=BR" \
+            "https://news.google.com/rss?hl=pt-BR&gl=BR&ceid=BR:pt-419"; do
+            code=$(curl -sS -L --max-time 25 -A "$UA" -H "Accept-Language: pt-BR,pt;q=0.9" \
+              -o trends.xml -w '%{http_code}' "$u" || echo 000)
+            echo "fonte: ${u%%\?*} -> HTTP $code, $(wc -c < trends.xml) bytes"
+            if [ "$code" = "200" ] && grep -q "<item>" trends.xml; then break; fi
+            : > trends.xml
+          done
           if [ -s trends.xml ]; then
             python3 - <<'PY'
           import re, html
@@ -134,15 +167,17 @@ jobs:
           itens = re.findall(r"<item>(.*?)</item>", x, re.S)
           linhas = []
           for it in itens[:25]:
-              t = re.search(r"<title>(.*?)</title>", it, re.S)
+              t = re.search(r"<title>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?</title>", it, re.S)
               v = re.search(r"<ht:approx_traffic>(.*?)</ht:approx_traffic>", it, re.S)
               if t:
-                  linhas.append(f"- {html.unescape(t.group(1)).strip()} ({(v.group(1).strip() if v else '?')} buscas)")
+                  titulo = html.unescape(t.group(1)).strip()
+                  linhas.append(f"- {titulo} ({v.group(1).strip()} buscas)" if v else f"- {titulo}")
           open("trends.txt", "w", encoding="utf-8").write("\n".join(linhas) + "\n")
           print(f"Trends carregados: {len(linhas)} assuntos")
           PY
           else
             echo "(Trends indisponível nesta execução)" > trends.txt
+            echo "Trends indisponível nesta execução"
           fi
 
       - name: Claude apura e escreve a notícia
@@ -343,10 +378,12 @@ jobs:
             - Use apenas foto real de licença livre do Wikimedia Commons. Busque com:
               `curl -s "https://commons.wikimedia.org/w/api.php?action=query&format=json&generator=search&gsrnamespace=6&gsrlimit=50&gsrsearch=<TERMO>%20filetype:bitmap&prop=imageinfo&iiprop=extmetadata|url|size&iiurlwidth=640"`
             - Critérios: horizontal (proporção próxima de 16:9 ou 3:2; nunca quadrada ou
-              vertical), largura mínima de 1400 px (o Discover exige 1200), arquivo JPG, PNG ou WebP
-              com menos de 20 MB (o site reduz a foto sozinho), licença livre (CC BY,
+              vertical), largura mínima de 1400 px (o Discover exige 1200) e NO MÁXIMO 16
+              MEGAPIXELS (largura x altura <= 16.000.000; o site recusa fotos maiores),
+              arquivo JPG, PNG ou WebP com menos de 20 MB, licença livre (CC BY,
               CC BY-SA, CC0 ou domínio público) e autor informado. Entre duas fotos
-              parecidas, prefira a menor.
+              parecidas, prefira a menor. Os campos width e height vêm na resposta da
+              busca (iiprop=size): confira ANTES de escolher; o validador também confere.
             - Toda notícia PRECISA de foto: sem imagem_link e legenda_credito o site recusa
               a publicação. Faça até 5 buscas por notícia, com termos em português e em
               inglês. Se não achar foto específica dentro dos critérios, use uma foto
