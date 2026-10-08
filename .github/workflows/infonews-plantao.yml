@@ -1,4 +1,6 @@
 # Salvar no repositório do GitHub em: .github/workflows/infonews-plantao.yml
+# v3 (07/10/2026): Google Trends BR como insumo de pauta + títulos no padrão Discover/Notícias + validador anti-clickbait
+#   + categoria Economia e rodízio ponderado das vagas gerais por valor publicitário (RPM).
 #
 # Segredos necessários (Settings > Secrets and variables > Actions):
 #   CLAUDE_CODE_OAUTH_TOKEN  -> token da sua assinatura Claude (gerado com `claude setup-token`)
@@ -65,7 +67,7 @@ jobs:
           cat > validar.py <<'PY'
           import glob, json
 
-          CATS = {"Brasil", "Mundo", "Polícia", "Política", "Tecnologia", "Curiosidades", "Clima", "Esporte", "Eletromobilidade", "Energia Solar", "São José do Rio Preto", "Norte Pioneiro"}
+          CATS = {"Brasil", "Mundo", "Polícia", "Política", "Tecnologia", "Curiosidades", "Clima", "Esporte", "Eletromobilidade", "Energia Solar", "Economia", "São José do Rio Preto", "Norte Pioneiro"}
           erros = []
           arquivos = sorted(glob.glob("saida/1.json"))
           if not arquivos:
@@ -82,6 +84,14 @@ jobs:
               lf = str(d.get("linha_fina", ""))
               if not 10 <= len(t) <= 90:
                   erros.append(f"{a}: titulo tem {len(t)} caracteres (permitido: 10 a 90)")
+              tl = t.lower()
+              for ruim in ("veja o que", "você não vai acreditar", "saiba", "entenda", "chocante", "urgente", "...", "!", "?"):
+                  if ruim in tl:
+                      erros.append(f"{a}: titulo contém '{ruim}' (padrão clickbait; reescreva como frase completa)")
+              if t == t.upper() and len(t) > 15:
+                  erros.append(f"{a}: titulo em caixa alta")
+              if len(t) < 45:
+                  erros.append(f"{a}: titulo tem {len(t)} caracteres; use de 45 a 75")
               if not 80 <= len(lf) <= 160:
                   erros.append(f"{a}: linha_fina tem {len(lf)} caracteres (permitido: 80 a 160)")
               for campo in ("legenda_credito", "fonte_nome", "fonte_link", "imagem_link", "texto"):
@@ -112,7 +122,30 @@ jobs:
               print("TUDO OK:", len(arquivos), "arquivo(s) válidos")
           PY
 
-      - name: Claude apura e escreve as 4 notícias
+      - name: Baixar assuntos em alta (Google Trends Brasil)
+        if: steps.cfg.outputs.pronto == 'sim'
+        run: |
+          curl -sS -L --max-time 20 -A "Mozilla/5.0 (compatible; InfoNewsBot/1.0)" \
+            "https://trends.google.com/trending/rss?geo=BR" -o trends.xml || true
+          if [ -s trends.xml ]; then
+            python3 - <<'PY'
+          import re, html
+          x = open("trends.xml", encoding="utf-8", errors="ignore").read()
+          itens = re.findall(r"<item>(.*?)</item>", x, re.S)
+          linhas = []
+          for it in itens[:25]:
+              t = re.search(r"<title>(.*?)</title>", it, re.S)
+              v = re.search(r"<ht:approx_traffic>(.*?)</ht:approx_traffic>", it, re.S)
+              if t:
+                  linhas.append(f"- {html.unescape(t.group(1)).strip()} ({(v.group(1).strip() if v else '?')} buscas)")
+          open("trends.txt", "w", encoding="utf-8").write("\n".join(linhas) + "\n")
+          print(f"Trends carregados: {len(linhas)} assuntos")
+          PY
+          else
+            echo "(Trends indisponível nesta execução)" > trends.txt
+          fi
+
+      - name: Claude apura e escreve a notícia
         if: steps.cfg.outputs.pronto == 'sim'
         uses: anthropics/claude-code-action@v1
         with:
@@ -141,10 +174,18 @@ jobs:
               fonte. Só volte a um assunto se houver fato novo relevante, e deixe claro no
               texto o que mudou.
             - Não repita foto (imagem_origem) que apareça nessa lista.
+            - Leia `trends.txt`: são os assuntos mais buscados no Google Brasil agora
+              (ou um aviso de indisponibilidade). Use-os para ESCOLHER a pauta nas vagas
+              gerais: se um assunto em alta couber numa categoria geral, tiver fonte
+              confiável aberta e fato confirmado, ele tem prioridade. Nas vagas fixas
+              (setoriais, regionais, eleições), use o Trends só como desempate. Nunca
+              escreva sobre um assunto em alta sem fonte oficial ou de agência; assunto
+              em alta de fofoca, celebridade sem fato público ou tragédia com pessoa
+              identificada fica de fora.
 
             ## 2. Vaga, categoria e formato
             - Categorias válidas: Brasil, Mundo, Polícia, Política, Tecnologia,
-              Curiosidades, Clima, Esporte, Eletromobilidade, Energia Solar,
+              Curiosidades, Clima, Esporte, Economia, Eletromobilidade, Energia Solar,
               São José do Rio Preto, Norte Pioneiro (estas duas formam a seção
               "Regionais" do site).
             - TABELA DE VAGAS FIXAS (hora de Brasília, vaga ":00"). Prioridade máxima:
@@ -167,12 +208,24 @@ jobs:
                        1 de veículos leves; 1 de Energia Solar; 2 de São José do Rio Preto;
                        2 de Norte Pioneiro; 2 de eleições até 26/10), publique a que
                        estiver faltando. Se nada faltar, vaga geral.
-            - Todas as outras vagas (inclusive todas as ":30" e a madrugada) são GERAIS:
-              escolha, entre as 8 categorias gerais (Brasil, Mundo, Polícia, Política,
-              Tecnologia, Curiosidades, Clima, Esporte), a que está há MAIS tempo sem
-              publicação em `ultimas.json` (categoria ausente da lista vem primeiro).
-              Entre 23:00 e 05:30, prefira Mundo, Tecnologia, Curiosidades e Esporte,
-              que têm fatos novos de madrugada.
+            - Todas as outras vagas (inclusive todas as ":30" e a madrugada) são GERAIS,
+              com RODÍZIO PONDERADO por valor publicitário (temas de economia, tecnologia
+              e veículos rendem anúncios mais caros que polícia e curiosidades). Cotas
+              diárias das 36 vagas gerais: Economia 8, Tecnologia 7, Brasil 6, Mundo 5,
+              Política 3, Esporte 3, Clima 2, Curiosidades 1, Polícia 1. Para escolher:
+              conte em `ultimas.json` quantas notícias de cada categoria geral foram
+              publicadas HOJE (data de Brasília) e escolha a categoria com a MAIOR
+              diferença entre cota e publicado (empate: a que está há mais tempo sem
+              publicar). Se a categoria escolhida não tiver fato novo com fonte
+              confiável, passe para a próxima da lista e registre no relatório.
+              Entre 23:00 e 05:30, prefira Mundo, Tecnologia, Economia e Esporte, que
+              têm fatos novos de madrugada (bolsas asiáticas, lançamentos, jogos).
+            - Economia cobre: inflação, juros, câmbio, emprego, salário mínimo, INSS,
+              impostos e reforma tributária, FGTS, Pix e bancos, combustíveis, energia,
+              agronegócio, imóveis e crédito, varejo, empresas com fato concreto. Fontes:
+              Agência Brasil (/economia), gov.br/fazenda, bcb.gov.br, ibge.gov.br,
+              agenciagov.ebc.com.br, Agência Senado/Câmara, cnnbrasil.com.br/economia.
+              Sempre explique o que muda para o leitor (bolso, conta, salário).
             - Formato: texto curto (4 a 6 parágrafos), exceto nas vagas marcadas como
               TEXTO LONGO (mais de 600 palavras, ideal 650 a 900, sem enrolação).
             - posicao: "destaque" só nas vagas 08:00, 13:00 e 18:00 e nas de eleições;
@@ -268,7 +321,20 @@ jobs:
               ou crimes com pessoa identificada; acusações contra pessoa identificada;
               saúde de pessoa identificada; qualquer fato com uma única fonte duvidosa.
               Nesses casos, escolha outra pauta.
-            - Título com até 85 caracteres. Linha fina entre 120 e 150 caracteres.
+            - TÍTULO (padrão Google Discover e Google Notícias): entre 45 e 75
+              caracteres (limite duro: 85). Frase completa com sujeito e verbo no
+              presente, que diga O QUE aconteceu e ONDE/QUEM, com o termo principal
+              da pauta (nome, cidade, órgão ou produto) nas primeiras palavras. O
+              título precisa ser cumprido pelo texto: nada de "veja o que aconteceu",
+              "você não vai acreditar", "entenda", "saiba", "chocante", "urgente",
+              pergunta sem resposta, reticências, CAIXA ALTA ou ponto de exclamação.
+              Número e data concretos valem mais que adjetivo.
+            - LINHA FINA entre 120 e 150 caracteres: completa o título com o segundo
+              fato mais importante (ela vira a meta description e o texto do Discover).
+            - PRIMEIRO PARÁGRAFO: responde o quê, quem, quando, onde e segundo quem, em
+              até 60 palavras, repetindo naturalmente o termo principal do título.
+              Cada parágrafo seguinte traz um fato novo; o último dá contexto ou
+              próximo passo. Sem listas, sem subtítulos, sem frases de preenchimento.
             - A fonte principal vai nos campos fonte_nome e fonte_link (não escreva
               "Fonte:" no corpo). Se usou um segundo veículo, o último parágrafo é
               "Com informações de <veículo>."
@@ -276,7 +342,8 @@ jobs:
             ## 5. Foto
             - Use apenas foto real de licença livre do Wikimedia Commons. Busque com:
               `curl -s "https://commons.wikimedia.org/w/api.php?action=query&format=json&generator=search&gsrnamespace=6&gsrlimit=50&gsrsearch=<TERMO>%20filetype:bitmap&prop=imageinfo&iiprop=extmetadata|url|size&iiurlwidth=640"`
-            - Critérios: horizontal, largura mínima de 1400 px, arquivo JPG, PNG ou WebP
+            - Critérios: horizontal (proporção próxima de 16:9 ou 3:2; nunca quadrada ou
+              vertical), largura mínima de 1400 px (o Discover exige 1200), arquivo JPG, PNG ou WebP
               com menos de 20 MB (o site reduz a foto sozinho), licença livre (CC BY,
               CC BY-SA, CC0 ou domínio público) e autor informado. Entre duas fotos
               parecidas, prefira a menor.
