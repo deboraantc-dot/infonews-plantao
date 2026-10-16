@@ -1,4 +1,5 @@
 # Salvar no repositório do GitHub em: .github/workflows/esporte-ao-vivo.yml
+# v1.1 (15/10/2026): fotos reais em fontes oficiais com licença livre + crédito obrigatório.
 # Faixa "Esporte ao vivo" (14/10/2026): resultados e fatos de esporte quase em tempo real,
 # separada do rodízio do plantão principal. Usa os MESMOS 3 segredos do infonews-plantao.yml.
 # Teto desta faixa: 10 notícias/dia, SOMADAS ao teto de 48 do plantão principal.
@@ -118,6 +119,10 @@ jobs:
             echo "## Esporte ao vivo: nada a fazer (sem item novo ou teto diário atingido)" >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      - name: Instalar Pillow (leitura de imagens)
+        if: steps.cfg.outputs.pronto == 'sim'
+        run: pip install --quiet pillow
+
       - name: Preparar validador
         if: steps.cfg.outputs.pronto == 'sim' && steps.pauta.outputs.decisao == 'seguir'
         run: |
@@ -155,10 +160,19 @@ jobs:
               if not 220 <= palavras <= 450:
                   erros.append(f"{a}: texto tem {palavras} palavras (use 250 a 400)")
               img = str(d.get("imagem_link", ""))
-              if img and not img.startswith("https://upload.wikimedia.org/"):
-                  erros.append(f"{a}: imagem_link precisa começar com https://upload.wikimedia.org/")
-              elif img:
+              HOSTS_OK = ("upload.wikimedia.org", "agenciabrasil.ebc.com.br", "imagens.ebc.com.br", "www12.senado.leg.br",
+                          "www.camara.leg.br", "agenciagov.ebc.com.br", "www.gov.br", "www.aen.pr.gov.br", "www.agenciasp.sp.gov.br",
+                          "www.saopaulo.sp.gov.br", "www.riopreto.sp.gov.br", "www.fernandopolis.sp.gov.br", "www.ourinhos.sp.gov.br",
+                          "www.jacarezinho.pr.gov.br", "www.carlopolis.pr.gov.br", "www.santoantoniodaplatina.pr.gov.br",
+                          "www.cornelioprocopio.pr.gov.br", "www.bandeirantes.pr.gov.br", "www.votuporanga.sp.gov.br",
+                          "www.catanduva.sp.gov.br", "www.olimpia.sp.gov.br", "www.barretos.sp.gov.br", "www.mirassol.sp.gov.br",
+                          "www.abve.org.br", "www.absolar.org.br", "www.aneel.gov.br", "fotospublicas.com", "www.fotospublicas.com")
+              host = img.split("/")[2] if img.startswith("https://") and img.count("/") >= 3 else ""
+              if img and host not in HOSTS_OK and not host.endswith(".gov.br") and not host.endswith(".leg.br") and not host.endswith(".ebc.com.br"):
+                  erros.append(f"{a}: imagem_link de host nao permitido ({host}); use Commons, Agencia Brasil, Senado, Camara, gov.br, prefeituras ou agencias oficiais")
+              elif img and host == "upload.wikimedia.org":
                   try:
+                      import urllib.request, urllib.parse
                       nome = urllib.parse.unquote(img.rsplit("/", 1)[-1])
                       if "/thumb/" in img:
                           nome = urllib.parse.unquote(img.split("/thumb/", 1)[1].split("/")[2])
@@ -169,21 +183,41 @@ jobs:
                       w, h, mime, thumb = info.get("width", 0), info.get("height", 0), info.get("mime", ""), info.get("thumburl", "")
                       thumb = thumb.replace("https://thumb.wikimedia.org/", "https://upload.wikimedia.org/")
                       if not w:
-                          erros.append(f"{a}: imagem não encontrada no Commons ({nome})")
+                          erros.append(f"{a}: imagem nao encontrada no Commons ({nome}); use o campo url ORIGINAL do arquivo")
                       elif mime not in ("image/jpeg", "image/png"):
-                          erros.append(f"{a}: imagem é {mime}; use só JPG ou PNG")
+                          erros.append(f"{a}: imagem e {mime}; use so JPG ou PNG")
                       elif w < 1200:
-                          erros.append(f"{a}: imagem tem {w} px de largura (mínimo 1200)")
+                          erros.append(f"{a}: imagem tem {w} px de largura (minimo 1200)")
                       elif h > w:
-                          erros.append(f"{a}: imagem vertical; use foto horizontal")
+                          erros.append(f"{a}: imagem vertical ({w}x{h}); use foto horizontal")
                       elif not thumb:
-                          erros.append(f"{a}: Commons não gerou miniatura de 1600 px")
+                          erros.append(f"{a}: Commons nao gerou miniatura de 1600 px; escolha outra foto")
                       elif d.get("imagem_link") != thumb:
                           d["imagem_link"] = thumb
                           json.dump(d, open(a, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
-                          print(f"{a}: imagem_link trocado pela versão de 1600 px")
+                          print(f"{a}: imagem_link trocado pela versao de 1600 px do Commons ({w}x{h} original)")
                   except Exception as e:
-                      erros.append(f"{a}: não foi possível conferir a imagem no Commons ({e})")
+                      erros.append(f"{a}: nao foi possivel conferir a imagem no Commons ({e}); confira o nome do arquivo ou escolha outra foto")
+              elif img:
+                  # Foto de agencia oficial: baixa e confere formato e tamanho de verdade.
+                  try:
+                      import urllib.request, struct, io
+                      req = urllib.request.Request(img, headers={"User-Agent": "Mozilla/5.0 InfoNewsBot/1.0 (contato@infonews.today)"})
+                      raw = urllib.request.urlopen(req, timeout=30).read(6_000_000)
+                      from PIL import Image
+                      im = Image.open(io.BytesIO(raw))
+                      w, h = im.size
+                      if im.format not in ("JPEG", "PNG"):
+                          erros.append(f"{a}: imagem e {im.format}; use so JPG ou PNG")
+                      elif w < 1200:
+                          erros.append(f"{a}: imagem tem {w} px de largura (minimo 1200); procure o arquivo em tamanho original")
+                      elif h > w:
+                          erros.append(f"{a}: imagem vertical ({w}x{h}); use foto horizontal")
+                  except Exception as e:
+                      erros.append(f"{a}: nao foi possivel baixar/abrir a imagem ({e}); confira o link direto do arquivo")
+              lc = str(d.get("legenda_credito", ""))
+              if lc and "Foto:" not in lc:
+                  erros.append(f"{a}: legenda_credito precisa conter 'Foto: Autor/Veiculo (licenca)'")
           if erros:
               print("CORRIJA:")
               for e in erros: print(" -", e)
@@ -266,23 +300,44 @@ jobs:
             - posicao: "destaque" só para final, título, Seleção ou jogo de Libertadores
               com time brasileiro; nas demais, "normal". urgente: sempre false.
 
-            ## 5. Foto
-            - Use apenas foto real de licença livre do Wikimedia Commons, horizontal, mínimo
-              1400 px de largura, JPG ou PNG, licença CC BY, CC BY-SA, CC0 ou domínio público.
-              Busque com:
-              `curl -s "https://commons.wikimedia.org/w/api.php?action=query&format=json&generator=search&gsrnamespace=6&gsrlimit=50&gsrsearch=<TERMO>%20filetype:bitmap&prop=imageinfo&iiprop=extmetadata|url|size&iiurlwidth=640"`
-              Termos úteis: nome do estádio, escudo/uniforme do clube, "Estádio São Januário",
-              "Maracanã", "Arena", "Copa Libertadores", nome do atleta (só se a descrição do
-              arquivo o identificar). Entre duas fotos parecidas, prefira a menor.
-            - Baixe a miniatura (thumburl) com curl e abra com Read para conferir.
-            - Não repita foto (imagem_origem) que esteja em `ultimas.json`.
-            - imagem_link: endereço ORIGINAL em upload.wikimedia.org (campo url). O
-              validador troca pela versão de 1600 px.
-            - Foto genérica (estádio, bola, bandeira) deve ser identificada como
-              "imagem ilustrativa". Nunca use foto de Getty, AFP, Reuters, redes sociais
-              ou dos veículos; nunca gere imagem por IA.
-            - Legenda no padrão: "Descrição (foto de arquivo, ANO). Foto: Autor (licença),
-              via Wikimedia Commons".
+            ## 5. Foto (de preferência a foto REAL do fato, sempre com crédito)
+            Ordem de busca, da melhor para a pior. Pare na primeira que der foto boa:
+            1) A FOTO DA PRÓPRIA MATÉRIA na fonte oficial com licença livre. Abra a
+               página da notícia na fonte e pegue o link direto do arquivo da foto
+               (termina em .jpg/.jpeg/.png; use a maior versão disponível). Fontes
+               aceitas e o crédito de cada uma:
+               - Agência Brasil / EBC (agenciabrasil.ebc.com.br): CC BY 3.0 BR. Crédito:
+                 "Foto: Nome do fotógrafo/Agência Brasil (CC BY 3.0)".
+               - Agência Senado (www12.senado.leg.br/noticias) e Agência Câmara
+                 (camara.leg.br/noticias): "Foto: Nome/Agência Senado" ou "/Agência Câmara".
+               - Agência Gov, Palácio do Planalto e ministérios (gov.br): "Foto: Nome/PR"
+                 ou "Foto: Nome/MME" etc., com "(CC BY-ND)" quando a página indicar.
+               - AEN-PR (aen.pr.gov.br): "Foto: Nome/AEN-PR". Agência SP
+                 (agenciasp.sp.gov.br): "Foto: Nome/Governo de SP".
+               - Prefeituras e câmaras das regiões (riopreto.sp.gov.br, ourinhos.sp.gov.br,
+                 jacarezinho.pr.gov.br, carlopolis.pr.gov.br, fernandopolis.sp.gov.br e
+                 demais sites .gov.br): "Foto: Divulgação/Prefeitura de <Cidade>".
+               - ABVE, Absolar, Aneel e demais órgãos oficiais do setor: "Foto: Divulgação/<Órgão>".
+               Só use a foto se a página for da fonte oficial acima (nunca foto de
+               agência internacional, Getty, Reuters, AFP, EFE, G1, Globo, Estadão, UOL,
+               Lance, redes sociais ou de clube de futebol). Se a página indicar outro
+               fotógrafo ou "Reprodução", não use.
+            2) Wikimedia Commons, para foto do tema quando a fonte oficial não tiver foto
+               própria do fato. Busque com:
+               `curl -s "https://commons.wikimedia.org/w/api.php?action=query&format=json&generator=search&gsrnamespace=6&gsrlimit=50&gsrsearch=<TERMO>%20filetype:bitmap&prop=imageinfo&iiprop=extmetadata|url|size&iiurlwidth=640"`
+               Em imagem_link use o endereço ORIGINAL em upload.wikimedia.org (campo url);
+               o validador troca pela versão de 1600 px. Legenda: "Descrição (foto de
+               arquivo, ANO). Foto: Autor (licença), via Wikimedia Commons".
+            - Critérios para qualquer foto: horizontal (16:9 ou 3:2; nunca quadrada ou
+              vertical), largura mínima de 1200 px (ideal 1600), JPG ou PNG, licença livre
+              ou divulgação oficial, autor ou órgão identificado. Baixe com curl e abra
+              com Read para conferir que mostra o que a legenda diz. Identifique pessoas
+              SOMENTE pela legenda/descrição da fonte, nunca pelo rosto.
+            - Não repita foto (imagem_origem) que apareça em `ultimas.json`.
+            - Toda notícia PRECISA de foto e de legenda_credito com "Foto:"; sem isso o
+              site recusa. Foto genérica deve dizer "imagem ilustrativa" na legenda.
+              Nunca gere imagem por IA. Se não houver foto dentro das regras, troque de pauta.
+            - legenda_credito no padrão: "Legenda do que a foto mostra. Foto: Autor/Veículo (licença)".
 
             ## 6. Saída
             Cada arquivo `saida/N.json` com exatamente este formato:
@@ -294,7 +349,7 @@ jobs:
               "legenda_credito": "...",
               "fonte_nome": "Lance",
               "fonte_link": "https://...",
-              "imagem_link": "https://upload.wikimedia.org/...",
+              "imagem_link": "https://agenciabrasil.ebc.com.br/.../foto.jpg",
               "posicao": "normal",
               "urgente": false,
               "texto": "Parágrafo 1\nParágrafo 2\nParágrafo 3\nParágrafo 4"
