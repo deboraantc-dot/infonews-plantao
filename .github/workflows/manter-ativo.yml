@@ -1,0 +1,24 @@
+# Mantém o repositório ativo: o GitHub desativa as execuções agendadas de
+# repositórios públicos depois de 60 dias sem atividade (commits). Uma vez por
+# mês, este workflow faz um commit vazio, sem alterar nenhum arquivo.
+name: Manter repositório ativo
+
+on:
+  schedule:
+    - cron: "37 9 1 * *" # dia 1 de cada mês, 6h37 de Brasília
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  manter-ativo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Commit vazio mensal
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit --allow-empty -m "Manter repositório ativo ($(date -u +%Y-%m))"
+          git push
